@@ -119,9 +119,7 @@
   .list { padding: 12px; padding-bottom: 130px; padding-bottom: calc(130px + env(safe-area-inset-bottom)); }
   .list > * + * { margin-top: 8px; }
 
-  .empty {
-    text-align: center; padding: 80px 16px 16px;
-  }
+  .empty { text-align: center; padding: 80px 16px 16px; }
   .empty-sub { color: #a8a29e; font-size: 14px; margin-bottom: 4px; }
   .empty-title {
     color: #44403c; font-size: 16px; font-weight: 700;
@@ -271,6 +269,36 @@
     margin-top: 12px;
   }
 
+  /* Export modal text fields */
+  .field { margin-bottom: 12px; }
+  .field-label {
+    display: block;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #78716c;
+    margin-bottom: 6px;
+  }
+  .text-input {
+    width: 100%;
+    font-size: 16px; font-weight: 600;
+    padding: 12px 14px;
+    border: 2px solid #e7e5e4;
+    border-radius: 10px;
+    background: white;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .text-input:focus { border-color: #fbbf24; }
+  .export-meta {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: #78716c;
+    padding: 10px 0 0;
+    border-top: 1px solid #f5f5f4;
+    margin-top: 8px;
+  }
+  .export-meta .num { color: #1c1917; font-weight: 700; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -302,6 +330,7 @@
   Add price
 </button>
 
+<!-- Add price modal -->
 <div class="modal-backdrop hidden" id="modal">
   <div class="modal" id="modalCard">
     <div class="modal-head">
@@ -322,14 +351,68 @@
   </div>
 </div>
 
+<!-- Export modal -->
+<div class="modal-backdrop hidden" id="exportModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="uppercase-eyebrow">Export CSV</div>
+        <div class="modal-title">Research details</div>
+      </div>
+      <button class="modal-close" id="exportClose" aria-label="close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="field">
+      <label class="field-label" for="formInput">FORM of research</label>
+      <input class="text-input" id="formInput" type="text" placeholder="e.g. Galeria Bałtycka" autocomplete="off">
+    </div>
+    <div class="field">
+      <label class="field-label" for="brandInput">Brand</label>
+      <input class="text-input" id="brandInput" type="text" placeholder="e.g. Reserved" autocomplete="off">
+    </div>
+    <div class="export-meta">
+      <span>Date: <span class="num" id="exportDate"></span></span>
+      <span><span class="num" id="exportRowCount">0</span> rows</span>
+    </div>
+    <button class="modal-submit" id="exportSubmit" disabled>Download CSV</button>
+    <div class="modal-hint">Counts will stay until you delete them manually</div>
+  </div>
+</div>
+
 <script>
 (() => {
+  // ---------- configuration ----------
   const CATEGORIES = {
     dress:    ['woven', 'knitted', 'jeans', 'knitwear'],
     shirt:    ['woven', 'jeans'],
     trousers: ['woven', 'knitted', 'knitwear'],
   };
+
+  // CSV column headers — edit these to match your Excel sheet exactly
+  const CSV_HEADERS = [
+    'FORM of research',
+    'Brand',
+    'data badania',
+    'fabric',           // <- column for woven/knitted/jeans/knitwear
+    'subclass',         // <- column for dresses/shirts/trousers
+    'CSB reg',
+    'ilosc mk reg',
+  ];
+
+  // Pluralized category names used in the CSV.
+  // If you want to rename "shirt" to something else (e.g. "skirts"), change here.
+  const CATEGORY_CSV_NAMES = {
+    dress:    'dresses',
+    shirt:    'shirts',
+    trousers: 'trousers',
+  };
+
+  const CSV_SEPARATOR = ';';   // Polish Excel uses semicolon
+  const DECIMAL_COMMA = true;  // Polish Excel uses comma decimal
+
   const STORAGE_KEY = 'clothing-counter-v1';
+  const META_KEY = 'clothing-counter-meta-v1';
 
   // ---------- state ----------
   let items = [];
@@ -339,31 +422,49 @@
   let pendingDeleteTimer = null;
   let tappedId = null;
   let tappedTimer = null;
+  let lastForm = '';
+  let lastBrand = '';
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) items = JSON.parse(raw);
-  } catch (e) { /* ignore corrupted */ }
+  } catch (e) {}
+  try {
+    const rawMeta = localStorage.getItem(META_KEY);
+    if (rawMeta) {
+      const meta = JSON.parse(rawMeta);
+      lastForm = meta.form || '';
+      lastBrand = meta.brand || '';
+    }
+  } catch (e) {}
 
   const save = () => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }
-    catch (e) { /* quota or private mode */ }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch (e) {}
+  };
+  const saveMeta = () => {
+    try { localStorage.setItem(META_KEY, JSON.stringify({ form: lastForm, brand: lastBrand })); } catch (e) {}
   };
 
   const uid = () =>
-    (crypto && crypto.randomUUID)
+    (window.crypto && crypto.randomUUID)
       ? crypto.randomUUID()
       : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
-  const buzz = (ms = 8) => {
-    if (navigator.vibrate) navigator.vibrate(ms);
-  };
+  const buzz = (ms = 8) => { if (navigator.vibrate) navigator.vibrate(ms); };
 
   const fmtPrice = (n) =>
     new Intl.NumberFormat('pl-PL', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(n) + ' zł';
+
+  const todayPL = () => {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    return `${dd}.${mm}.${yy}`;
+  };
 
   // ---------- DOM refs ----------
   const $ = (id) => document.getElementById(id);
@@ -377,12 +478,20 @@
   const sectionCountEl = $('sectionCount');
   const sectionLabelEl = $('sectionLabel');
   const sectionValueEl = $('sectionValue');
+
   const modalEl = $('modal');
-  const modalCardEl = $('modalCard');
   const modalCloseEl = $('modalClose');
   const modalTitleEl = $('modalTitle');
   const modalSubmitEl = $('modalSubmit');
   const priceInputEl = $('priceInput');
+
+  const exportModalEl = $('exportModal');
+  const exportCloseEl = $('exportClose');
+  const formInputEl = $('formInput');
+  const brandInputEl = $('brandInput');
+  const exportSubmitEl = $('exportSubmit');
+  const exportDateEl = $('exportDate');
+  const exportRowCountEl = $('exportRowCount');
 
   // ---------- render ----------
   function renderTabs() {
@@ -400,8 +509,7 @@
   function renderTotals() {
     const grandCount = items.reduce((s, i) => s + i.count, 0);
     const grandValue = items.reduce((s, i) => s + i.count * i.price, 0);
-    totalsEl.innerHTML =
-      `${grandCount} <span class="totals-sep">·</span> ${fmtPrice(grandValue)}`;
+    totalsEl.innerHTML = `${grandCount} <span class="totals-sep">·</span> ${fmtPrice(grandValue)}`;
     csvBtn.disabled = items.length === 0;
   }
 
@@ -463,7 +571,7 @@
     renderSection();
   }
 
-  // ---------- actions ----------
+  // ---------- counter actions ----------
   function setCategory(cat) {
     category = cat;
     if (!CATEGORIES[category].includes(subcategory)) {
@@ -490,9 +598,7 @@
   }
 
   function dec(id) {
-    items = items.map(i =>
-      i.id === id ? { ...i, count: Math.max(0, i.count - 1) } : i
-    );
+    items = items.map(i => i.id === id ? { ...i, count: Math.max(0, i.count - 1) } : i);
     save();
     buzz(5);
     renderTotals();
@@ -512,14 +618,14 @@
       pendingDelete = id;
       clearTimeout(pendingDeleteTimer);
       pendingDeleteTimer = setTimeout(() => {
-        pendingDelete = null;
-        renderSection();
+        pendingDelete = null; renderSection();
       }, 2500);
       buzz(5);
       renderSection();
     }
   }
 
+  // ---------- price modal ----------
   function openModal() {
     modalTitleEl.textContent = `${category} · ${subcategory}`;
     priceInputEl.value = '';
@@ -531,7 +637,6 @@
     modalEl.classList.add('hidden');
     priceInputEl.blur();
   }
-
   function submitPrice() {
     const p = parseFloat(priceInputEl.value.replace(',', '.').trim());
     if (isNaN(p) || p < 0) return;
@@ -551,26 +656,78 @@
     renderAll();
   }
 
-  function exportCSV() {
+  // ---------- export modal ----------
+  function openExportModal() {
     if (items.length === 0) return;
-    const sorted = items.slice().sort((a, b) => {
-      if (a.category !== b.category) return a.category.localeCompare(b.category);
-      if (a.subcategory !== b.subcategory) return a.subcategory.localeCompare(b.subcategory);
-      return a.price - b.price;
-    });
-    const header = 'category,subcategory,price,count,total\n';
-    const rows = sorted.map(i =>
-      `${i.category},${i.subcategory},${i.price.toFixed(2)},${i.count},${(i.count * i.price).toFixed(2)}`
-    ).join('\n');
-    const totalCount = items.reduce((s, i) => s + i.count, 0);
-    const totalValue = items.reduce((s, i) => s + i.count * i.price, 0);
-    const csv = header + rows + `\n,,,${totalCount},${totalValue.toFixed(2)}`;
+    formInputEl.value = lastForm;
+    brandInputEl.value = lastBrand;
+    exportDateEl.textContent = todayPL();
+    const totalRows = items.filter(i => i.count > 0).length;
+    exportRowCountEl.textContent = totalRows;
+    updateExportSubmitState();
+    exportModalEl.classList.remove('hidden');
+    setTimeout(() => {
+      if (!lastForm) formInputEl.focus();
+      else if (!lastBrand) brandInputEl.focus();
+    }, 50);
+  }
+  function closeExportModal() {
+    exportModalEl.classList.add('hidden');
+    formInputEl.blur();
+    brandInputEl.blur();
+  }
+  function updateExportSubmitState() {
+    exportSubmitEl.disabled = !formInputEl.value.trim() || !brandInputEl.value.trim();
+  }
 
-    const date = new Date().toISOString().slice(0, 10);
-    const filename = `clothing-${date}.csv`;
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  function csvEscape(val) {
+    const s = String(val);
+    if (s.indexOf(CSV_SEPARATOR) !== -1 || s.indexOf('"') !== -1 || /[\r\n]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+  function fmtCsvPrice(n) {
+    const fixed = n.toFixed(2);
+    return DECIMAL_COMMA ? fixed.replace('.', ',') : fixed;
+  }
 
-    // Try Web Share API for iOS-friendly handoff (optional)
+  function submitExport() {
+    const form = formInputEl.value.trim();
+    const brand = brandInputEl.value.trim();
+    if (!form || !brand) return;
+
+    lastForm = form;
+    lastBrand = brand;
+    saveMeta();
+
+    const date = todayPL();
+    const sorted = items
+      .filter(i => i.count > 0)
+      .slice()
+      .sort((a, b) => {
+        if (a.category !== b.category) return a.category.localeCompare(b.category);
+        if (a.subcategory !== b.subcategory) return a.subcategory.localeCompare(b.subcategory);
+        return a.price - b.price;
+      });
+
+    const headerLine = CSV_HEADERS.map(csvEscape).join(CSV_SEPARATOR);
+    const rows = sorted.map(i => [
+      form,
+      brand,
+      date,
+      i.subcategory,
+      CATEGORY_CSV_NAMES[i.category] || i.category,
+      fmtCsvPrice(i.price),
+      String(i.count),
+    ].map(csvEscape).join(CSV_SEPARATOR));
+
+    const csv = '\ufeff' + headerLine + '\r\n' + rows.join('\r\n') + '\r\n';
+    const safeBrand = brand.replace(/[^\p{L}\p{N}_-]+/gu, '_');
+    const safeForm = form.replace(/[^\p{L}\p{N}_-]+/gu, '_');
+    const filename = `${safeForm}_${safeBrand}_${date.replace(/\./g, '-')}.csv`;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -581,6 +738,9 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 100);
+
+    closeExportModal();
+    buzz(15);
   }
 
   // ---------- events ----------
@@ -606,20 +766,24 @@
 
   fabEl.addEventListener('click', openModal);
   modalCloseEl.addEventListener('click', closeModal);
-  modalEl.addEventListener('click', e => {
-    if (e.target === modalEl) closeModal();
-  });
+  modalEl.addEventListener('click', e => { if (e.target === modalEl) closeModal(); });
   priceInputEl.addEventListener('input', () => {
     modalSubmitEl.disabled = priceInputEl.value.trim() === '';
   });
-  priceInputEl.addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitPrice();
-  });
+  priceInputEl.addEventListener('keydown', e => { if (e.key === 'Enter') submitPrice(); });
   modalSubmitEl.addEventListener('click', submitPrice);
 
-  csvBtn.addEventListener('click', exportCSV);
+  csvBtn.addEventListener('click', openExportModal);
+  exportCloseEl.addEventListener('click', closeExportModal);
+  exportModalEl.addEventListener('click', e => { if (e.target === exportModalEl) closeExportModal(); });
+  formInputEl.addEventListener('input', updateExportSubmitState);
+  brandInputEl.addEventListener('input', updateExportSubmitState);
+  formInputEl.addEventListener('keydown', e => { if (e.key === 'Enter') brandInputEl.focus(); });
+  brandInputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !exportSubmitEl.disabled) submitExport();
+  });
+  exportSubmitEl.addEventListener('click', submitExport);
 
-  // initial render
   renderAll();
 })();
 </script>
