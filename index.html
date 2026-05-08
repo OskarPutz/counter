@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" rx="40" fill="%231c1917"/><g stroke="white" stroke-width="11" stroke-linecap="round" fill="none"><line x1="55" y1="55" x2="55" y2="125"/><line x1="78" y1="55" x2="78" y2="125"/><line x1="101" y1="55" x2="101" y2="125"/><line x1="124" y1="55" x2="124" y2="125"/></g><line x1="42" y1="115" x2="138" y2="65" stroke="%23fbbf24" stroke-width="11" stroke-linecap="round"/></svg>'>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { color-scheme: light; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -240,6 +241,7 @@
     border: 2px solid #e7e5e4;
     border-radius: 12px;
     background: white;
+    color: #1c1917;
     outline: none;
     transition: border-color 0.15s;
   }
@@ -286,6 +288,7 @@
     border: 2px solid #e7e5e4;
     border-radius: 10px;
     background: white;
+    color: #1c1917;
     outline: none;
     transition: border-color 0.15s;
   }
@@ -298,6 +301,44 @@
     margin-top: 8px;
   }
   .export-meta .num { color: #1c1917; font-weight: 700; }
+
+  /* Clear-after-export toggle */
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0 4px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .toggle-label {
+    font-size: 14px; font-weight: 600;
+    color: #44403c;
+  }
+  .toggle-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0; height: 0;
+  }
+  .toggle-track {
+    position: relative;
+    width: 44px; height: 26px;
+    background: #e7e5e4;
+    border-radius: 999px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle-thumb {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    transition: transform 0.2s;
+  }
+  .toggle-row.on .toggle-track { background: #fbbf24; }
+  .toggle-row.on .toggle-thumb { transform: translateX(18px); }
 
   .hidden { display: none !important; }
 </style>
@@ -312,7 +353,7 @@
     </div>
     <button class="csv-btn" id="csvBtn" disabled>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      CSV
+      XLS
     </button>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -356,7 +397,7 @@
   <div class="modal">
     <div class="modal-head">
       <div>
-        <div class="uppercase-eyebrow">Export CSV</div>
+        <div class="uppercase-eyebrow">Export Excel</div>
         <div class="modal-title">Research details</div>
       </div>
       <button class="modal-close" id="exportClose" aria-label="close">
@@ -375,8 +416,13 @@
       <span>Date: <span class="num" id="exportDate"></span></span>
       <span><span class="num" id="exportRowCount">0</span> rows</span>
     </div>
-    <button class="modal-submit" id="exportSubmit" disabled>Download CSV</button>
-    <div class="modal-hint">Counts will stay until you delete them manually</div>
+    <label class="toggle-row" id="clearToggleRow">
+      <span class="toggle-label">Clear all counts after export</span>
+      <input type="checkbox" id="clearToggle" class="toggle-input">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    </label>
+    <button class="modal-submit" id="exportSubmit" disabled>Download Excel</button>
+    <div class="modal-hint" id="exportHint">Counts will stay until you delete them manually</div>
   </div>
 </div>
 
@@ -384,32 +430,28 @@
 (() => {
   // ---------- configuration ----------
   const CATEGORIES = {
-    dress:    ['woven', 'knitted', 'jeans', 'knitwear'],
-    shirt:    ['woven', 'jeans'],
-    trousers: ['woven', 'knitted', 'knitwear'],
+    dress:  ['woven', 'knitted', 'jeans', 'knitwear'],
+    shirt:  ['woven', 'jeans'],
+    skirts: ['woven', 'knitted', 'jeans'],
   };
 
-  // CSV column headers — edit these to match your Excel sheet exactly
-  const CSV_HEADERS = [
+  // Column headers — edit these to match your Excel sheet exactly
+  const EXPORT_HEADERS = [
     'FORM of research',
     'Brand',
     'data badania',
     'fabric',           // <- column for woven/knitted/jeans/knitwear
-    'subclass',         // <- column for dresses/shirts/trousers
+    'subclass',         // <- column for dresses/shirts/skirts
     'CSB reg',
     'ilosc mk reg',
   ];
 
-  // Pluralized category names used in the CSV.
-  // If you want to rename "shirt" to something else (e.g. "skirts"), change here.
-  const CATEGORY_CSV_NAMES = {
-    dress:    'dresses',
-    shirt:    'shirts',
-    trousers: 'trousers',
+  // Pluralized category names used in the export.
+  const CATEGORY_EXPORT_NAMES = {
+    dress:  'dresses',
+    shirt:  'shirts',
+    skirts: 'skirts',
   };
-
-  const CSV_SEPARATOR = ';';   // Polish Excel uses semicolon
-  const DECIMAL_COMMA = true;  // Polish Excel uses comma decimal
 
   const STORAGE_KEY = 'clothing-counter-v1';
   const META_KEY = 'clothing-counter-meta-v1';
@@ -424,6 +466,7 @@
   let tappedTimer = null;
   let lastForm = '';
   let lastBrand = '';
+  let clearAfterExport = false;
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -435,6 +478,7 @@
       const meta = JSON.parse(rawMeta);
       lastForm = meta.form || '';
       lastBrand = meta.brand || '';
+      clearAfterExport = !!meta.clearAfterExport;
     }
   } catch (e) {}
 
@@ -442,7 +486,7 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch (e) {}
   };
   const saveMeta = () => {
-    try { localStorage.setItem(META_KEY, JSON.stringify({ form: lastForm, brand: lastBrand })); } catch (e) {}
+    try { localStorage.setItem(META_KEY, JSON.stringify({ form: lastForm, brand: lastBrand, clearAfterExport })); } catch (e) {}
   };
 
   const uid = () =>
@@ -492,6 +536,9 @@
   const exportSubmitEl = $('exportSubmit');
   const exportDateEl = $('exportDate');
   const exportRowCountEl = $('exportRowCount');
+  const clearToggleEl = $('clearToggle');
+  const clearToggleRowEl = $('clearToggleRow');
+  const exportHintEl = $('exportHint');
 
   // ---------- render ----------
   function renderTabs() {
@@ -657,6 +704,14 @@
   }
 
   // ---------- export modal ----------
+  function syncToggleUI() {
+    clearToggleEl.checked = clearAfterExport;
+    clearToggleRowEl.classList.toggle('on', clearAfterExport);
+    exportHintEl.textContent = clearAfterExport
+      ? 'Counts will be cleared after export'
+      : 'Counts will stay until you delete them manually';
+  }
+
   function openExportModal() {
     if (items.length === 0) return;
     formInputEl.value = lastForm;
@@ -664,6 +719,7 @@
     exportDateEl.textContent = todayPL();
     const totalRows = items.filter(i => i.count > 0).length;
     exportRowCountEl.textContent = totalRows;
+    syncToggleUI();
     updateExportSubmitState();
     exportModalEl.classList.remove('hidden');
     setTimeout(() => {
@@ -680,16 +736,12 @@
     exportSubmitEl.disabled = !formInputEl.value.trim() || !brandInputEl.value.trim();
   }
 
-  function csvEscape(val) {
-    const s = String(val);
-    if (s.indexOf(CSV_SEPARATOR) !== -1 || s.indexOf('"') !== -1 || /[\r\n]/.test(s)) {
-      return '"' + s.replace(/"/g, '""') + '"';
-    }
-    return s;
-  }
-  function fmtCsvPrice(n) {
-    const fixed = n.toFixed(2);
-    return DECIMAL_COMMA ? fixed.replace('.', ',') : fixed;
+  function xmlEsc(val) {
+    return String(val)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   function submitExport() {
@@ -711,23 +763,27 @@
         return a.price - b.price;
       });
 
-    const headerLine = CSV_HEADERS.map(csvEscape).join(CSV_SEPARATOR);
-    const rows = sorted.map(i => [
-      form,
-      brand,
-      date,
-      i.subcategory,
-      CATEGORY_CSV_NAMES[i.category] || i.category,
-      fmtCsvPrice(i.price),
-      String(i.count),
-    ].map(csvEscape).join(CSV_SEPARATOR));
+    const strCell = (v) => `<Cell><Data ss:Type="String">${xmlEsc(v)}</Data></Cell>`;
+    const numCell = (v) => `<Cell><Data ss:Type="Number">${v}</Data></Cell>`;
 
-    const csv = '\ufeff' + headerLine + '\r\n' + rows.join('\r\n') + '\r\n';
+    const headerRow = '<Row>' + EXPORT_HEADERS.map(strCell).join('') + '</Row>';
+    const dataRows = sorted.map(i => '<Row>' + [
+      strCell(form),
+      strCell(brand),
+      strCell(date),
+      strCell(i.subcategory),
+      strCell(CATEGORY_EXPORT_NAMES[i.category] || i.category),
+      numCell(i.price.toFixed(2)),
+      numCell(i.count),
+    ].join('') + '</Row>').join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n  <Worksheet ss:Name="Sheet1">\n    <Table>\n      ${headerRow}\n      ${dataRows}\n    </Table>\n  </Worksheet>\n</Workbook>`;
+
     const safeBrand = brand.replace(/[^\p{L}\p{N}_-]+/gu, '_');
     const safeForm = form.replace(/[^\p{L}\p{N}_-]+/gu, '_');
-    const filename = `${safeForm}_${safeBrand}_${date.replace(/\./g, '-')}.csv`;
+    const filename = `${safeForm}_${safeBrand}_${date.replace(/\./g, '-')}.xls`;
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -741,6 +797,13 @@
 
     closeExportModal();
     buzz(15);
+
+    if (clearAfterExport) {
+      items = [];
+      pendingDelete = null;
+      save();
+      renderAll();
+    }
   }
 
   // ---------- events ----------
@@ -783,6 +846,12 @@
     if (e.key === 'Enter' && !exportSubmitEl.disabled) submitExport();
   });
   exportSubmitEl.addEventListener('click', submitExport);
+
+  clearToggleEl.addEventListener('change', () => {
+    clearAfterExport = clearToggleEl.checked;
+    saveMeta();
+    syncToggleUI();
+  });
 
   renderAll();
 })();
